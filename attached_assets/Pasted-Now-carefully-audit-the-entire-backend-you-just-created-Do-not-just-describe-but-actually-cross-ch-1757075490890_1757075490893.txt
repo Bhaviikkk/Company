@@ -1,0 +1,35 @@
+Now carefully audit the entire backend you just created. Do not just describe, but actually cross-check each critical component to ensure it is implemented correctly, production-ready, and aligned with our requirements. Go through these specific points one by one:
+
+Scrapers – Verify that scrapers for SC/NCLT/NCLAT are not placeholders. Ensure they:
+
+Handle pagination, rate limits, and deduplication (via hashing).
+
+Respect robots.txt and retry failed requests.
+
+Normalize extracted text into a consistent schema.
+
+Database – Confirm PostgreSQL/CockroachDB models include proper indexes for search (court, section, date). Add Alembic migrations if missing. Check connection pooling for scalability.
+
+Summarisation Agents – Verify LangChain + Gemini multi-agent system is really working:
+
+Summariser outputs strictly structured JSON (issues, holding, reasoning, citations).
+
+Validator agent cross-checks against source text (not just re-prompts).
+
+Accuracy/grounding score is computed numerically (≥95%).
+
+Search Engine – Confirm if search uses Postgres text search or Typesense/Meilisearch. For scalability, implement proper search indexing and snippet generation.
+
+Celery + Workers – Ensure Celery tasks run independently of the API server, with a separate worker entrypoint. Confirm Redis integration is working for task queueing.
+
+Storage Layer – Confirm S3-compatible storage (or Supabase) integration is working with signed URL access, not just local storage.
+
+API Endpoints – Test each endpoint (/premium-research, /bulk-analysis, /multi-agent-analysis, etc.) with sample docs. Validate response structure, pagination, and error handling.
+
+Quality Assurance – Ensure summaries below 95% grounding score are flagged for human review. Build admin endpoints for approving/rejecting flagged summaries.
+
+Security – Verify JWT-based authentication for ingestion/admin endpoints. Add rate limiting to public endpoints.
+
+Testing – Scaffold pytest tests for ingestion, summarisation, and search endpoints. Ensure CI tests can run locally or in Replit.
+
+Finally, after this audit, fix or upgrade any weak spots you find, so the system is genuinely robust, production-ready, and capable of handling real Company Secretary research needs. Do not exaggerate — only claim features that are fully implemented and tested. Where possible, provide logs or test outputs to prove correctness.

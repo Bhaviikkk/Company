@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     
     # LLM Configuration
     google_api_key: Optional[str] = os.getenv("GOOGLE_API_KEY")
-    llm_model: str = os.getenv("LLM_MODEL", "gemini-1.5-pro")
+    llm_model: str = os.getenv("LLM_MODEL", "gemini-1.5-flash")
     
     # App
     fastapi_host: str = os.getenv("FASTAPI_HOST", "0.0.0.0")
