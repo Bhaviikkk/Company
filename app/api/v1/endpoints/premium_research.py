@@ -5,6 +5,9 @@ from pydantic import BaseModel
 from app.db.base import get_db
 from app.services.premium_research_engine import PremiumResearchEngine
 from app.agents.agent_orchestrator import AgentOrchestrator
+from app.services.quality_assurance import qa_engine
+from app.core.auth import get_current_user
+from app.core.rate_limiting import rate_limit
 import logging
 
 logger = logging.getLogger(__name__)
@@ -25,6 +28,16 @@ class CustomAnalysisRequest(BaseModel):
     document_text: str
     custom_prompt: str
     agent_preference: str = "auto"  # auto, legal, cs, all
+
+class MultiAgentAnalysisRequest(BaseModel):
+    document_text: str
+    user_query: Optional[str] = None
+    workflow_type: str = "comprehensive"
+
+class PremiumAnalysisResponse(BaseModel):
+    status: str
+    workflow_type: str
+    data: Dict[str, Any]
 
 @router.post("/premium-research")
 async def premium_research_request(
@@ -99,11 +112,11 @@ async def custom_document_analysis(
             detail=f"Custom analysis failed: {str(e)}"
         )
 
-@router.post("/multi-agent-analysis")
+@router.post("/multi-agent-analysis", response_model=PremiumAnalysisResponse)
+@rate_limit("20/hour")  
 async def multi_agent_document_analysis(
-    document_text: str = Body(..., embed=True),
-    user_query: Optional[str] = Body(None, embed=True),
-    workflow_type: str = Body("comprehensive", embed=True),
+    request: MultiAgentAnalysisRequest,
+    current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -111,20 +124,45 @@ async def multi_agent_document_analysis(
     Combines Legal Analyst, CS Expert, and Quality Reviewer perspectives.
     """
     try:
-        logger.info(f"Multi-agent analysis request with workflow: {workflow_type}")
+        logger.info(f"Multi-agent analysis request with workflow: {request.workflow_type}")
         
         # Perform multi-agent analysis
         result = await agent_orchestrator.analyze_document(
-            document_text=document_text,
-            user_query=user_query,
-            workflow_type=workflow_type
+            document_text=request.document_text,
+            user_query=request.user_query,
+            workflow_type=request.workflow_type
         )
         
-        return {
-            "status": "success",
-            "workflow_type": workflow_type,
-            "data": result
-        }
+        # QUALITY ASSURANCE CHECK - CRITICAL FOR PRODUCTION
+        passes_qa, quality_score, qa_issues = qa_engine.validate_quality_threshold(result)
+        
+        if not passes_qa:
+            logger.warning(f"Analysis failed quality threshold: Score {quality_score:.2f}, Issues: {qa_issues}")
+            
+            # Flag for human review
+            flagged_result = await qa_engine.flag_for_human_review(
+                result, 
+                "multi_agent_analysis", 
+                qa_issues
+            )
+            
+            return {
+                "status": "quality_review_required",
+                "workflow_type": request.workflow_type,
+                "quality_score": quality_score,
+                "quality_issues": qa_issues,
+                "data": flagged_result
+            }
+        
+        # Add quality report to successful analysis
+        quality_report = qa_engine.generate_quality_report(result)
+        result["quality_assessment"] = quality_report
+        
+        return PremiumAnalysisResponse(
+            status="success",
+            workflow_type=request.workflow_type,
+            data=result
+        )
         
     except Exception as e:
         logger.error(f"Multi-agent analysis error: {e}")
