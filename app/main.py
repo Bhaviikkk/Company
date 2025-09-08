@@ -1,6 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.v1.endpoints import search, documents, summaries, premium_research
+from app.api.v1.endpoints import search, documents, summaries, premium_research, auth
+from app.core.rate_limiting import limiter
+from app.services.quality_assurance import qa_engine
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from app.core.logging import logger
 from app.core.config import settings
 from app.core.database import DatabaseManager
@@ -55,11 +59,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Include all routers
 app.include_router(search.router, prefix="/api/v1", tags=["🔍 Search"])
 app.include_router(documents.router, prefix="/api/v1", tags=["📄 Documents"])
 app.include_router(summaries.router, prefix="/api/v1", tags=["📝 Summaries"])
 app.include_router(premium_research.router, prefix="/api/v1", tags=["🏆 Premium AI Research"])
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["🔐 Authentication"])
 
 @app.on_event("startup")
 async def startup_event():

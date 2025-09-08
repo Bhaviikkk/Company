@@ -19,3 +19,9 @@ aiofiles>=23.0.0
 boto3>=1.26.0
 pydantic-settings
 alembic
+passlib[bcrypt]
+python-jose[cryptography]
+slowapi
+httpx
+pytest
+pytest-asyncio
