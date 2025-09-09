@@ -25,47 +25,46 @@ class QualityAssuranceEngine:
     def calculate_overall_quality_score(self, analysis: Dict[str, Any]) -> float:
         """Calculate overall quality score from multiple metrics"""
         
-        scores = []
+        agent_analyses = analysis.get("agent_analyses", {})
+        if not agent_analyses:
+            return self._assess_content_completeness(analysis)
         
-        # Extract quality metrics from agent analyses
-        for agent_name, agent_result in analysis.get("agent_analyses", {}).items():
-            if isinstance(agent_result, dict):
-                # Legal Analyst quality
-                if agent_name == "legal_analyst":
-                    if "confidence_score" in agent_result:
-                        try:
-                            score = float(agent_result["confidence_score"])
-                            scores.append(score)
-                        except (ValueError, TypeError):
-                            pass
-                
-                # CS Expert quality  
-                elif agent_name == "cs_expert":
-                    if "confidence_level" in agent_result:
-                        confidence_map = {"high": 0.95, "medium": 0.75, "low": 0.50}
-                        scores.append(confidence_map.get(agent_result["confidence_level"], 0.50))
-                
-                # Quality Reviewer assessment
-                elif agent_name == "quality_reviewer":
-                    if "overall_quality_score" in agent_result:
-                        try:
-                            score = float(agent_result["overall_quality_score"])
-                            scores.append(score)
-                        except (ValueError, TypeError):
-                            pass
+        scores = {}
+        weights = {"legal_analyst": 0.25, "cs_expert": 0.25, "quality_reviewer": 0.50}
+        total_weight = 0
+
+        # Legal Analyst Score
+        legal_analysis = agent_analyses.get("legal_analyst", {})
+        if legal_analysis and "confidence_score" in legal_analysis:
+            scores["legal_analyst"] = float(legal_analysis.get("confidence_score", 0.0))
+            total_weight += weights["legal_analyst"]
+
+        # CS Expert Score
+        cs_analysis = agent_analyses.get("cs_expert", {})
+        if cs_analysis and "confidence_level" in cs_analysis:
+            confidence_map = {"high": 0.95, "medium": 0.75, "low": 0.50}
+            scores["cs_expert"] = confidence_map.get(cs_analysis.get("confidence_level"), 0.50)
+            total_weight += weights["cs_expert"]
+
+        # Quality Reviewer Score (most important)
+        reviewer_analysis = agent_analyses.get("quality_reviewer", {})
+        if reviewer_analysis and "overall_quality_score" in reviewer_analysis:
+            scores["quality_reviewer"] = float(reviewer_analysis.get("overall_quality_score", 0.0))
+            total_weight += weights["quality_reviewer"]
         
-        # Default scoring if no quality metrics found
         if not scores:
-            # Assign default score based on content completeness
-            content_score = self._assess_content_completeness(analysis)
-            scores.append(content_score)
+            return self._assess_content_completeness(analysis)
         
-        # Calculate weighted average (Quality Reviewer gets 40% weight)
-        if len(scores) >= 3:
-            # If we have all three agents
-            return (scores[0] * 0.3 + scores[1] * 0.3 + scores[2] * 0.4)
-        else:
-            return sum(scores) / len(scores) if scores else 0.0
+        # Calculate weighted average score
+        weighted_score = sum(scores[agent] * weights[agent] for agent in scores)
+        
+        if total_weight > 0:
+            final_score = weighted_score / total_weight
+            return final_score
+        
+        # Fallback to simple average if weights are messed up
+        return sum(scores.values()) / len(scores) if scores else 0.0
+
     
     def _assess_content_completeness(self, analysis: Dict[str, Any]) -> float:
         """Assess content completeness as fallback quality measure"""

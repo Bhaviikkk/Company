@@ -1,1 +1,1 @@
-# Legal-AI Backend Application
+"""Legal-AI Ultimate Backend Application Package."""

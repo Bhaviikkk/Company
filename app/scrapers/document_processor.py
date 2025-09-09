@@ -10,6 +10,9 @@ from datetime import datetime
 from app.services.parser import document_parser
 from app.services.storage import storage_service
 from app.db.base import SessionLocal
+from app.scrapers.supreme_court_scraper import SupremeCourtScraper
+from app.scrapers.nclt_nclat_scraper import NCLTNCLATScraper
+from app.scrapers.constitution_scraper import ConstitutionScraper
 from app.db.models import Document
 from sqlalchemy.orm import Session
 
@@ -76,7 +79,7 @@ class DocumentProcessor:
             return {"status": "error", "error": "No URL provided"}
         
         # Step 1: Download PDF content
-        pdf_content = await self._download_pdf(doc)
+        pdf_content = await self._download_pdf(doc, source_name)
         if not pdf_content:
             return {
                 "url": url,
@@ -147,39 +150,39 @@ class DocumentProcessor:
                 "error": f"Database error: {str(e)}"
             }
     
-    async def _download_pdf(self, doc: Dict) -> Optional[bytes]:
-        """Download PDF content from URL"""
+    async def _download_pdf(self, doc: Dict, source_name: str) -> Optional[bytes]:
+        """Download PDF content from URL using the appropriate scraper for the source."""
         
         url = doc.get("url")
         if not url or not url.lower().endswith('.pdf'):
             return None
+
+        # Map the source name from the ingestion script to the correct scraper class
+        scraper_class_map = {
+            "sc": SupremeCourtScraper,
+            "nclt": NCLTNCLATScraper,
+            "constitution": ConstitutionScraper,
+        }
+
+        scraper_class = scraper_class_map.get(source_name.lower())
+
+        if not scraper_class:
+            logger.error(f"No scraper configured for source '{source_name}' to download PDF from {url}")
+            return None
         
         try:
-            # Use the scraper that found this document to download it
-            from app.scrapers.supreme_court_scraper import SupremeCourtScraper  
-            from app.scrapers.nclt_nclat_scraper import NCLTNCLATScraper
-            
-            # Determine appropriate scraper
-            if "supremecourt" in url.lower() or "sci.gov.in" in url.lower():
-                async with SupremeCourtScraper() as scraper:
-                    result = await scraper.fetch_with_retry(url)
-                    if result:
-                        content_type, content = result
-                        if 'pdf' in content_type.lower():
-                            return content
-            
-            elif "nclt" in url.lower() or "nclat" in url.lower():
-                async with NCLTNCLATScraper() as scraper:
-                    result = await scraper.fetch_with_retry(url)
-                    if result:
-                        content_type, content = result  
-                        if 'pdf' in content_type.lower():
-                            return content
-            
+            async with scraper_class() as scraper:
+                result = await scraper.fetch_with_retry(url)
+                if result:
+                    content_type, content = result
+                    if 'pdf' in content_type.lower():
+                        logger.info(f"Successfully downloaded PDF from {url} using {scraper_class.__name__}")
+                        return content
+            logger.warning(f"Failed to download PDF from {url} using {scraper_class.__name__}. Result was None or not a PDF.")
             return None
             
         except Exception as e:
-            logger.error(f"Error downloading PDF from {url}: {e}")
+            logger.error(f"Error downloading PDF from {url} using {scraper_class.__name__}: {e}")
             return None
     
     def _parse_date(self, date_str: str) -> Optional[datetime.date]:

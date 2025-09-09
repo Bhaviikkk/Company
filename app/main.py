@@ -5,7 +5,7 @@ from app.core.rate_limiting import limiter
 from app.services.quality_assurance import qa_engine
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from app.core.logging import logger
+from app.core.logging import setup_logging, logger
 from app.core.config import settings
 from app.core.database import DatabaseManager
 from app.db.models import Base
@@ -73,6 +73,9 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["🔐 Authenticatio
 @app.on_event("startup")
 async def startup_event():
     """Initialize the ultimate legal research backend"""
+    # Setup structured logging for production
+    setup_logging()
+
     logger.info("🚀 Starting Ultimate Legal-AI Backend...")
     
     try:
