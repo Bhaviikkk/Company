@@ -1,57 +1,30 @@
-from sqlalchemy import Column, String, Date, Text, DateTime, ForeignKey, func, Integer
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
-from app.db.base import Base
+# In file: app/db/models.py
+
 import uuid
+from sqlalchemy import Column, String, DateTime, Text, Index, func, Date
+from sqlalchemy.dialects.postgresql import UUID
+from .base import Base
 
 class Document(Base):
-    """Document model for storing legal documents"""
-    __tablename__ = "documents"
-    
+    __tablename__ = 'documents'
     document_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    title = Column(String, nullable=False)
-    court = Column(String)
+    # Adding index=True for standard, fast lookups on title
+    title = Column(String(500), nullable=False, index=True)
+    court = Column(String(200))
     decision_date = Column(Date)
-    url = Column(String)
-    storage_path = Column(String)
-    content_hash = Column(String, unique=True, index=True)
-    raw_text = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
-    # Relationships
-    summaries = relationship("Summary", back_populates="document")
+    created_at = Column(DateTime, default=func.now())
+    source_url = Column(String(1024), unique=True, nullable=True) # URLs can be null for non-web sources
+    content_hash = Column(String(64), unique=True, index=True)
+    raw_text = Column(Text, nullable=False)
+    source = Column(String(100))
+    storage_path = Column(String(1024), nullable=True)
 
-class Summary(Base):
-    """Summary model for storing AI-generated summaries"""
-    __tablename__ = "summaries"
-    
-    summary_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.document_id"), nullable=False)
-    style = Column(String, default="cs_student")  # cs_student | research | advocate
-    model_id = Column(String)
-    prompt_version = Column(String)
-    summary_short = Column(Text)
-    summary_detailed = Column(Text)
-    span_citations = Column(JSONB)
-    quality_score = Column(String)
-    human_status = Column(String, default="pending")  # pending | approved | rejected
-    grounding_score = Column(String)
-    citation_score = Column(String)
-    consistency_score = Column(String)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
-    # Relationships
-    document = relationship("Document", back_populates="summaries")
-
-class ProcessingTask(Base):
-    """Task tracking for background processing"""
-    __tablename__ = "processing_tasks"
-    
-    task_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.document_id"))
-    task_type = Column(String, nullable=False)  # ingestion | summarization | qa
-    status = Column(String, default="pending")  # pending | running | completed | failed
-    error_message = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+class Company(Base):
+    __tablename__ = 'companies'
+    cin = Column(String(21), primary_key=True)
+    # Using a standard B-Tree index, which is robust and universally supported
+    company_name = Column(String(255), nullable=False, index=True)
+    date_of_registration = Column(Date)
+    company_status = Column(String(100))
+    registered_address = Column(Text)
+    created_at = Column(DateTime, default=func.now())

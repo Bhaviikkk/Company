@@ -19,9 +19,11 @@ import sys
 import os
 
 # Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Make sure this path is correct for your project structure
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from app.db.models import Base
+
+from app.db.base import Base # Corrected import to get the Base
 from app.core.config import settings
 
 # Use our models' metadata
@@ -64,8 +66,15 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    # Get the configuration section from alembic.ini
+    configuration = config.get_section(config.config_ini_section, {})
+    
+    # Set the sqlalchemy.url from our application's settings object
+    configuration["sqlalchemy.url"] = settings.database_url
+    
+    # Create the engine using the updated configuration
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )

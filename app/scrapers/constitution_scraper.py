@@ -1,48 +1,150 @@
+# app/scrapers/constitution_scraper.py
 import asyncio
-from typing import List, Dict
-from .base_scraper import BaseLegalScraper
 import logging
+import httpx
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
+from app.scrapers.base_scraper import BaseScraper
 
 logger = logging.getLogger(__name__)
 
-class ConstitutionScraper(BaseLegalScraper):
+class ConstitutionScraper(BaseScraper):
     """
-    A scraper for the Constitution of India and related documents.
-    This initial version targets the primary consolidated PDF.
+    Asynchronously scrapes the Constitution of India from the india.gov.in portal.
+    This version is rebuilt to be resilient to common HTML structure changes.
     """
+    # Updated URL based on current search (Sep 2025)
+    BASE_URL = "https://legislative.gov.in/constitution-of-india/"
+    constitution_pdf_url = "https://legislative.gov.in/sites/default/files/constitution-of-india.pdf"  # Updated URL
 
-    def __init__(self):
-        super().__init__(
-            base_url="https://legislative.gov.in",
-            rate_limit=1.0,
-            respect_robots=True
-        )
-        # Source: Legislative Department, Ministry of Law and Justice
-        # This is the consolidated Constitution of India document (as of Nov 2022)
-        self.constitution_pdf_url = "https://cdnbbsr.s3waas.gov.in/s380537a945c7aaa788ccfcdf1229c319d/uploads/2022/11/2022111531.pdf"
+    async def scrape(self):
+        logger.info(f"Starting scrape for Constitution of India from {self.BASE_URL}")
+        documents_to_process = []
+        seen_urls = set()   # ✅ Track processed article URLs
+        seen_titles = set() # ✅ Track processed titles (backup dedup)
 
-    async def scrape_main_constitution(self) -> List[Dict]:
-        """
-        Scrapes the main Constitution of India PDF.
-        In a real-world scenario, this would also find amendment acts.
-        """
-        logger.info("Starting scrape for the Constitution of India.")
-        
-        documents = []
-        
-        # For this specific case, we have a direct link.
-        # We'll create a document dictionary that matches the expected format.
-        doc = {
-            "url": self.constitution_pdf_url,
-            "title": "The Constitution of India",
-            "context": "The complete, updated Constitution of India document from the Legislative Department.",
-            "decision_date": None,  # The constitution doesn't have a single 'decision date'.
-            "source_page": "https://legislative.gov.in/constitution-of-india",
-            "jurisdiction": "Constitution of India",
-            "court": "Constitutional Document" # Using 'court' field for categorization
-        }
-        
-        documents.append(doc)
-        
-        logger.info(f"Found {len(documents)} constitutional document(s) to process.")
-        return documents
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            try:
+                response = await self.fetch_with_retry(client, self.BASE_URL)
+                if not response:
+                    logger.error("Failed to fetch the main Constitution page. Aborting scrape.")
+                    return
+
+                soup = BeautifulSoup(response.text, "html.parser")
+                
+                # Robust content area detection
+                content_selectors = [
+                    "div.text-full-text",
+                    ".content",
+                    "main",
+                    "#content"
+                ]
+                content_area = None
+                for selector in content_selectors:
+                    content_area = soup.select_one(selector)
+                    if content_area:
+                        break
+                
+                if not content_area:
+                    logger.error("Could not locate the primary content area for the Constitution TOC.")
+                    return
+
+                # Find article links robustly
+                article_links_selectors = [
+                    "ul li a",
+                    ".toc a",
+                    "ol li a",
+                    "div a[href*='article']"
+                ]
+                article_links = []
+                for selector in article_links_selectors:
+                    article_links = content_area.select(selector)
+                    if article_links:
+                        break
+
+                logger.info(f"Found {len(article_links)} raw links. Filtering valid Constitution links...")
+
+                # ✅ Filter links to remove junk (social, print, etc.)
+                valid_links = []
+                for link in article_links:
+                    href = link.get("href")
+                    if not href:
+                        continue
+
+                    href = href.lower()
+
+                    # Must belong to Constitution of India pages
+                    if "constitution-of-india" not in href:
+                        continue
+
+                    # Exclude junk/social links
+                    if any(x in href for x in ["facebook", "twitter", "linkedin", "print", "sharer"]):
+                        continue
+
+                    # Only accept articles/schedules
+                    if not any(x in href for x in ["article", "schedule"]):
+                        continue
+
+                    # ✅ Deduplicate links by absolute URL
+                    abs_url = urljoin(self.BASE_URL, href)
+                    if abs_url in seen_urls:
+                        continue
+                    seen_urls.add(abs_url)
+
+                    valid_links.append(link)
+
+                logger.info(f"Filtered down to {len(valid_links)} unique Constitution links.")
+
+                for link in valid_links[:50]:  # Limit to first 50 for testing/efficiency
+                    article_title = link.text.strip()
+                    article_url = urljoin(self.BASE_URL, link.get('href'))
+
+                    # ✅ Deduplicate by title as well (backup safety)
+                    if article_title in seen_titles:
+                        logger.debug(f"Skipping duplicate title: {article_title}")
+                        continue
+                    seen_titles.add(article_title)
+                    
+                    logger.debug(f"Fetching: {article_title}")
+                    article_response = await self.fetch_with_retry(client, article_url)
+                    if not article_response:
+                        logger.warning(f"Skipping article due to fetch failure: {article_title}")
+                        continue
+
+                    article_soup = BeautifulSoup(article_response.text, "html.parser")
+                    # Robust content div
+                    content_div_selectors = [
+                        "div.field-item.even",
+                        ".content",
+                        "article",
+                        ".full-text"
+                    ]
+                    article_content_div = None
+                    for selector in content_div_selectors:
+                        article_content_div = article_soup.select_one(selector)
+                        if article_content_div:
+                            break
+                    
+                    if article_content_div:
+                        raw_text = article_content_div.get_text(separator='\n', strip=True)
+                        if len(raw_text) > 50:  # Basic quality check
+                            doc_data = {
+                                "title": f"Constitution of India - {article_title}",
+                                "raw_text": raw_text,
+                                "source_url": article_url,
+                                "source": "Constitution of India",
+                                "court": "Government of India",
+                            }
+                            documents_to_process.append(doc_data)
+                    else:
+                        logger.warning(f"No content div found for article: {article_title}")
+            
+            except Exception as e:
+                logger.critical(f"A critical error occurred during the Constitution scrape: {e}", exc_info=True)
+
+        if documents_to_process:
+            logger.info(f"Submitting {len(documents_to_process)} Constitution articles for processing.")
+            if self.processor:
+                await self.processor.process_documents(documents_to_process, source_name="constitution")
+
+        logger.info("Finished scraping the Constitution of India.")

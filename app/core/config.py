@@ -18,8 +18,11 @@ class Settings(BaseSettings):
     # LLM Configuration
     google_api_key: Optional[str] = os.getenv("GOOGLE_API_KEY")
     llm_model: str = os.getenv("LLM_MODEL", "gemini-1.5-flash")
+    data_gov_api_key: Optional[str] = os.getenv("DATA_GOV_API_KEY")
+    indian_kanoon_api_token: Optional[str] = os.getenv("INDIAN_KANOON_API_TOKEN")
     
     # App
+    debug: bool = os.getenv("DEBUG", "False").lower() in ("true", "1", "t")
     fastapi_host: str = os.getenv("FASTAPI_HOST", "0.0.0.0")
     fastapi_port: int = int(os.getenv("FASTAPI_PORT", "5000"))
     
